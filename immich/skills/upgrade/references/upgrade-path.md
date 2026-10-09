@@ -36,6 +36,7 @@ Compose and `.env` changes that are not version stops, but must be applied when 
 - 1.119.0: `HOST` was renamed to `IMMICH_HOST`, and some metrics variables were removed.
 - 1.137.0: new compose template.
 - 3.0.0: `IMMICH_MACHINE_LEARNING_PING_TIMEOUT`, `MACHINE_LEARNING_PRELOAD__CLIP` and `MACHINE_LEARNING_PRELOAD__FACIAL_RECOGNITION` were removed.
+- 3.0.0, after the hop: the release notes say "For assets imported prior to v3, you will also need to re-run Metadata Extraction in the job panel for them to be re-processed." Run **Extract Metadata > All**, then check thumbnails and transcoding as in `verify.md` section 4.
 
 Step 4's diff of each hop's release files catches these, as long as each hop diffs against its own previous release.
 
