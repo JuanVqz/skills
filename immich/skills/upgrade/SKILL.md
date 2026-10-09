@@ -140,6 +140,20 @@ Keep the dumps until the user has used the new version for a while.
 
 Report to the user: the path taken (from, hops, to), what the release notes changed for them, where the dumps are, the verification results, and anything unusual in the logs. Remind them that the mobile apps and the server should be on the same major version.
 
+Also save a short record next to `docker-compose.yml`, so the next upgrade (or the user, months later) can see what happened without this conversation. Name it `immich-upgrade-<date>.md` and keep it this small:
+
+```markdown
+# Immich upgrade <date>
+
+- From <old> to <new>, via <hops or "direct">
+- Dump: <path>
+- Local compose edits kept: <list>
+- Verified: <healthy, version, migrations, ports, counts, thumbnails>
+- Notes: <anything the user must remember, or "none">
+```
+
+If a step could not run (no Docker access, a check the user still has to do), say so in Notes instead of marking it verified.
+
 ## If it goes wrong
 
 Do not point an older image at a migrated database, and do not downgrade the image. Instead:
