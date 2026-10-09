@@ -1,6 +1,10 @@
 {
   "name": "juanvqz-skills",
-  "owner": { "name": "Juan Vásquez", "url": "https://github.com/JuanVqz" },
+  "description": "Claude Code skills for self-hosted homelab apps, written to work on anyone's setup.",
+  "owner": {
+    "name": "Juan Vásquez",
+    "url": "https://github.com/JuanVqz"
+  },
   "plugins": [
     {
       "name": "immich-tools",
