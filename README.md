@@ -14,6 +14,12 @@ As a plugin, from this repo's marketplace:
 /plugin install immich-tools --marketplace JuanVqz/skills
 ```
 
+With the [skills CLI](https://skills.sh/juanvqz/skills), for Claude Code or other agents:
+
+```bash
+npx skills add JuanVqz/skills --skill immich-upgrade
+```
+
 Or copy a single skill into your skills directory:
 
 ```bash
