@@ -1,6 +1,6 @@
 ---
 name: immich-upgrade
-description: Upgrade a self-hosted Immich install (Docker Compose) safely, including jumps across major versions. Backs up the database before anything else, plans the path through Immich's required intermediate versions, reads the release notes of every version in between for breaking changes, refreshes the official compose files while keeping the user's own edits, bumps a pinned IMMICH_VERSION, and verifies that photos, thumbnails, videos and migrations survived. Use this whenever someone wants to update or upgrade Immich, sees the "new version available" banner, names an Immich version like v3.4.0, asks whether an Immich release is safe to install, wants to pull newer Immich images, or is stuck on an old Immich version, even if they never say "upgrade". Unofficial; not affiliated with Immich or FUTO.
+description: Upgrade a self-hosted Immich install (Docker Compose) safely, including jumps across major versions, or just plan an upgrade without changing anything. Backs up the database before anything else, plans the path through Immich's required intermediate versions, reads the release notes of every version in between for breaking changes, refreshes the official compose files while keeping the user's own edits, bumps a pinned IMMICH_VERSION, and verifies that photos, thumbnails, videos and migrations survived. Use this whenever someone wants to update or upgrade Immich, sees the "new version available" banner, names an Immich version like v3.4.0, asks whether an Immich release is safe to install, wants to pull newer Immich images, or is stuck on an old Immich version, even if they never say "upgrade". Unofficial; not affiliated with Immich or FUTO.
 ---
 
 # Upgrade Immich
@@ -8,6 +8,8 @@ description: Upgrade a self-hosted Immich install (Docker Compose) safely, inclu
 An Immich upgrade is a one-way door. Every release can migrate the database, and Immich does not support downgrades, not even within a minor version. Going back means restoring a backup. So this skill works in a fixed order: back up first, read before changing anything, change on purpose, and prove the library survived. Follow the steps in order. The backup and the checks are the point, not overhead.
 
 Work on the machine that runs Immich, or over SSH to it. Ask the user for the host if it is not obvious.
+
+If the user only wants to know what an upgrade would involve ("is it safe to update?", "what would change?", "plan it", "dry run"), do Step 1 and Step 3 without changing anything, report the path and what changes for them, and stop. Do not take the dump or touch any file in that case; start from Step 2 when they ask to go ahead.
 
 Two rules for the whole run:
 
