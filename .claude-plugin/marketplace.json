@@ -1,0 +1,11 @@
+{
+  "name": "juanvqz-skills",
+  "owner": { "name": "Juan Vásquez", "url": "https://github.com/JuanVqz" },
+  "plugins": [
+    {
+      "name": "immich-tools",
+      "source": "./immich",
+      "description": "Unofficial skills for a self-hosted Immich: safe upgrades with backup, upgrade path and verification."
+    }
+  ]
+}

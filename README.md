@@ -4,19 +4,27 @@
 
 | Skill | What it does |
 |---|---|
-| [`immich/upgrade`](immich/upgrade/SKILL.md) | Upgrades a self-hosted Immich (Docker Compose): reads every release in between for breaking changes, dumps the database, refreshes the official compose files while keeping your edits, restarts, and verifies health, migrations and port bindings. |
+| [`immich/skills/upgrade`](immich/skills/upgrade/SKILL.md) (`immich-upgrade`, in the `immich-tools` plugin) | Upgrades a self-hosted Immich (Docker Compose): reads every release in between for breaking changes, dumps the database, refreshes the official compose files while keeping your edits, restarts, and verifies health, migrations and port bindings. |
 
 ## Install
 
-Copy a skill folder into your skills directory, named after the skill:
+As a plugin, from this repo's marketplace:
+
+```text
+/plugin install immich-tools --marketplace JuanVqz/skills
+```
+
+Or copy a single skill into your skills directory:
 
 ```bash
 git clone https://github.com/JuanVqz/skills.git
 mkdir -p ~/.claude/skills
-cp -r skills/immich/upgrade ~/.claude/skills/immich-upgrade
+cp -r skills/immich/skills/upgrade ~/.claude/skills/immich-upgrade
 ```
 
-Then ask Claude Code something like "upgrade Immich to the latest version". The skill also triggers on the "new version available" banner or a version number.
+Then ask Claude Code something like "upgrade Immich to the latest version". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.
+
+The Immich skills are unofficial and not affiliated with Immich or FUTO. They read release notes and download release files from GitHub (`github.com/immich-app/immich`); nothing else leaves your machine.
 
 ## Conventions
 

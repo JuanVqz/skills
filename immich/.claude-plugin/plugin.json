@@ -1,0 +1,10 @@
+{
+  "name": "immich-tools",
+  "version": "0.1.0",
+  "description": "Unofficial Claude Code skills for running a self-hosted Immich. Not affiliated with Immich or FUTO. Starts with a safe upgrade skill: backup first, required intermediate versions, release notes, keeping your compose edits, and deep verification.",
+  "author": { "name": "Juan Vásquez", "url": "https://juanvasquez.dev" },
+  "homepage": "https://github.com/JuanVqz/skills",
+  "repository": "https://github.com/JuanVqz/skills",
+  "license": "MIT",
+  "keywords": ["immich", "homelab", "self-hosting", "docker", "upgrade"]
+}
