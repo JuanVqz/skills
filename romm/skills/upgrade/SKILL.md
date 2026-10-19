@@ -68,7 +68,7 @@ done
 diff -r /tmp/romm-<from> /tmp/romm-<to>
 ```
 
-`env.template` lists every environment variable with its default; most new ones only need setting if the user wants the feature. A changed default matters more than a new variable.
+`env.template` lists every environment variable with its default; most new ones only need setting if the user wants the feature. A changed default matters more than a new variable. Check how a new variable interacts with what the install already does: `TZ` (new in 5.4.0, default UTC) names save versions, but an install that mounts `/etc/localtime` already logged in local time without it.
 
 ## Step 5: Back up the database
 
@@ -80,7 +80,7 @@ gzip -t <safe-path>/romm-<running-version>-<date>.sql.gz && ls -la <safe-path>/r
 
 The password goes through the container's own environment, so it never appears in the command or in `ps`. `--single-transaction` gives a consistent dump without locking RomM. A library of about 15,000 games took 35 seconds and 40 MB compressed. Write it outside the MariaDB data folder, ideally on another disk; stop if a command fails or the dump is much smaller than a previous one.
 
-Also back up the `config` folder (mounted at `/romm/config`) and the `assets` folder (saves, states, screenshots), which hold user data. The `resources` folder (scraped covers and media) is large and can be scraped again, but scraping is slow and rate-limited; if the user has no copy, say so. The ROMs are not touched by an upgrade.
+Also back up the `config` folder (mounted at `/romm/config`) and the `assets` folder (saves, states, screenshots), which hold user data: `tar czf <safe-path>/romm-<running-version>-<date>-assets-config.tgz -C <assets-parent> assets -C <config-parent> config` (each `-C` switches to the folder that holds the next one). The `resources` folder (scraped covers and media) is large and can be scraped again, but scraping is slow and rate-limited; if the user has no copy, say so. The ROMs are not touched by an upgrade.
 
 Then snapshot what the library holds, piping the SQL through stdin so the quoting survives:
 
@@ -111,10 +111,10 @@ Set the target in the image line (`rommapp/romm:<to>`), confirm with `docker com
 
 ```bash
 docker compose up -d
-docker logs -f romm 2>&1 | grep -m1 -E "RomM is now available|migrations failed|Error"
+timeout 1800 sh -c 'docker logs -f romm 2>&1 | grep -m1 -E "RomM is now available|migrations failed|Traceback"'
 ```
 
-`up -d` recreates the container whose image changed. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library (5.4.0 asks for 15 to 20). Watch the log instead.
+`up -d` recreates the container whose image changed. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
 
 ## Step 9: Verify
 
@@ -125,6 +125,15 @@ docker logs -f romm 2>&1 | grep -m1 -E "RomM is now available|migrations failed|
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:8080:8080` back into `8080:8080`, which Docker publishes on every interface, past host firewalls like `ufw`.
 - The counts from Step 5 match: run the same `counts.sql`. More is normal if a scan added games in between; fewer is not, so stop and investigate before deleting the backup.
 - The URL people actually use (reverse proxy, Tailscale, a domain) answers `/api/heartbeat`. Check it from another machine; a server often cannot resolve its own MagicDNS or split-DNS name.
+- Covers are still served. Take one cover path from the database and fetch it through RomM:
+
+  ```bash
+  echo "select path_cover_l from roms where path_cover_l <> '' limit 1;" \
+    | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -N'
+  curl -s -o /dev/null -w "%{http_code} %{content_type}\n" localhost:<port>/assets/romm/resources/<that path>
+  ```
+
+  `200 image/png` (or jpeg, webp) is right. A 403 usually means the file on disk is not world-readable: RomM's nginx runs as its own user and copies covers keeping their mode.
 - Open the web UI: a platform shows its games with covers, and a game's page opens.
 
 ## Step 10: Update the clients, clean up and report
