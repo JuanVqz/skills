@@ -5,7 +5,7 @@
 | Skill | What it does |
 |---|---|
 | [`immich/skills/upgrade`](immich/skills/upgrade/SKILL.md) (`immich-upgrade`, in the `immich-tools` plugin) | Upgrades a self-hosted Immich (Docker Compose): reads every release in between for breaking changes, dumps the database, refreshes the official compose files while keeping your edits, restarts, and verifies health, migrations and port bindings. |
-| [`bookorbit/skills/upgrade`](bookorbit/skills/upgrade/SKILL.md) (`bookorbit-upgrade`, in the `bookorbit-tools` plugin) | Upgrades a self-hosted BookOrbit (Docker Compose): backs up the database and app data, reads every release in between, refreshes the official compose file while keeping your edits, pins the image instead of `latest`, and verifies health, migrations, port bindings and the book count. |
+| [`bookorbit/skills/upgrade`](bookorbit/skills/upgrade/SKILL.md) (`bookorbit-upgrade`, in the `bookorbit-tools` plugin) | Upgrades a self-hosted BookOrbit (Docker Compose): backs up the database and app data, reads every release in between, refreshes the official compose file while keeping your edits, pins the image instead of `latest`, and verifies health, migrations, port bindings and the library counts. |
 
 ## Install
 

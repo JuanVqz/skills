@@ -1,6 +1,6 @@
 ---
 name: bookorbit-upgrade
-description: Upgrade a self-hosted BookOrbit book library (Docker Compose) safely, or just plan an upgrade without changing anything. Backs up the database and the app data first, reads the release notes of every version in between, refreshes the official compose file while keeping the user's own edits, pins the image to an exact version, and verifies health, migrations, version, port bindings and the book count. Use this whenever someone wants to update or upgrade BookOrbit, names a BookOrbit version like v3.4.0, asks whether a BookOrbit release is safe to install, wants to pull a newer BookOrbit image, or runs BookOrbit on `latest` and wants to stop being surprised, even if they never say "upgrade". Unofficial; not affiliated with BookOrbit.
+description: Upgrade a self-hosted BookOrbit book library (Docker Compose) safely, or just plan an upgrade without changing anything. Backs up the database and the app data first, reads the release notes of every version in between, refreshes the official compose file while keeping the user's own edits, pins the image to an exact version, and verifies health, migrations, version, port bindings and the library counts. Use this whenever someone wants to update or upgrade BookOrbit, names a BookOrbit version like v3.4.0, asks whether a BookOrbit release is safe to install, wants to pull a newer BookOrbit image, or runs BookOrbit on `latest` and wants to stop being surprised, even if they never say "upgrade". Unofficial; not affiliated with BookOrbit.
 ---
 
 # Upgrade BookOrbit
@@ -27,7 +27,7 @@ Record, before changing anything:
 - **Paths:** the books folder mounted at `/books`, the app data folder mounted at `/data`, and any extra mounts (a Book Dock folder, for example).
 - **Port bindings:** `docker compose ps --format '{{.Name}} {{.Ports}}'`. Step 7 compares against this.
 - **Health while the old version still works:** both containers healthy, `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"`, and `docker compose config --quiet` succeeds.
-- **The book count:** the number of books shown in the web UI library, or the count of book folders under the books path. Step 7 compares against it.
+- **The library counts:** Step 2 snapshots them from the database, after the backup.
 
 If the stack is already unhealthy, stop and fix that first.
 
@@ -44,6 +44,21 @@ ls -la <safe-path>/bookorbit-<running-version>-<date>*
 The dump reads the user and database from the container's own environment, so no credential appears in the command. Write both files outside the Postgres data folder, ideally on another disk. Stop if any command fails, or if the dump is much smaller than a previous one.
 
 The app data folder holds covers, caches and installed plugins; it is small. The books are not touched by an upgrade, but if the user has no copy of the books folder anywhere else, say so.
+
+Then snapshot what the library holds, so Step 7 can prove nothing was lost. Pipe the SQL in through stdin; quoting it inside `ssh '...'` or `sh -c "..."` breaks on the inner quotes:
+
+```bash
+cat > counts.sql <<'EOF'
+select (select count(*) from books) as books, (select count(*) from book_files) as files,
+       (select count(*) from authors) as authors, (select count(*) from users) as users,
+       (select count(*) from reading_progress) as progress, (select count(*) from annotations) as annotations,
+       (select count(*) from collections) as collections;
+EOF
+docker exec -i bookorbit-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < counts.sql \
+  | tee <safe-path>/bookorbit-<running-version>-<date>-counts.txt
+```
+
+Table names match v3.4.0; if a query fails on another version, list the tables (`\dt`) and adapt rather than skip the check. Compare like with like: the database `books` count can differ from the number of book folders on disk (one install had 65 rows for 64 folders), so use the same query before and after.
 
 ## Step 3: Read what changed
 
@@ -79,6 +94,8 @@ Apply new or renamed variables from `.env.example` to `.env` by hand. Generate a
 
 Set the target in the image line (`ghcr.io/bookorbit/bookorbit:<to>`) or in `APP_IMAGE` in `.env`, whichever the install uses, then confirm: `docker compose config | grep 'image: ghcr.io/bookorbit'`.
 
+Pull the image now, while the old version still runs: `docker pull ghcr.io/bookorbit/bookorbit:<to>`. It proves the tag exists (a typo or a `v` prefix fails here, not after the app is down) and keeps the downtime in Step 6 to a few seconds. The image is about 250 MB compressed.
+
 ## Step 6: Pull and restart
 
 ```bash
@@ -90,14 +107,15 @@ docker compose up -d
 
 ## Step 7: Verify
 
-Wait until both containers report healthy (about a minute), then check, fixing or reporting anything that fails:
+Wait until both containers report healthy (a few seconds on a small library: 3.3.0 to 3.4.0 was healthy within 5 seconds), then check, fixing or reporting anything that fails:
 
 - `docker compose ps`: both services `healthy`.
 - The version: `docker logs bookorbit-app --since 10m 2>&1 | grep -o 'update_check\] \[end\] version=[^ ]*'` shows the target. There is no version endpoint.
-- Migrations: `docker logs bookorbit-app --since 10m 2>&1 | grep -iE "migrat|error"` shows "Migrations applied successfully" and no errors. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (seen since v3.3.0).
+- Migrations: `docker logs bookorbit-app --since 10m 2>&1 | grep "Migrations applied successfully"` prints one line.
+- Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since 10m 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0).
 - Health: `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"` with the database `up`.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:3000:3000` back into `3000:3000`, which Docker publishes on every interface, past host firewalls like `ufw`.
-- The book count matches Step 1.
+- The counts from Step 2 match: run the same `counts.sql` again. More books is normal if an import ran in between; fewer is not, so stop and investigate before deleting the backup.
 - The URL people actually use (reverse proxy, Tailscale, a domain) answers `/api/v1/health`. Check it from another machine; a server often cannot resolve its own MagicDNS or split-DNS name.
 - If the release touched a device integration the user relies on (KOReader, Kobo, OPDS, email), ask them to try it once.
 
