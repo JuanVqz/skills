@@ -34,7 +34,7 @@ mkdir -p ~/.claude/skills
 cp -r skills/immich/skills/upgrade ~/.claude/skills/immich-upgrade
 ```
 
-Then ask Claude Code something like "upgrade Immich to the latest version" "upgrade BookOrbit" or "upgrade RomM". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.
+Then ask Claude Code something like "upgrade Immich to the latest version", "upgrade BookOrbit" or "upgrade RomM". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.
 
 The Immich skills are unofficial and not affiliated with Immich or FUTO, the BookOrbit skills are unofficial and not affiliated with BookOrbit, and the RomM skills are unofficial and not affiliated with RomM. They read release notes and download release files from GitHub (`github.com/immich-app/immich`, `github.com/bookorbit/bookorbit`, `github.com/rommapp`); nothing else leaves your machine.
 
