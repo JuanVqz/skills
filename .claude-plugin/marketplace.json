@@ -10,6 +10,11 @@
       "name": "immich-tools",
       "source": "./immich",
       "description": "Unofficial skills for a self-hosted Immich: safe upgrades with backup, upgrade path and verification."
+    },
+    {
+      "name": "bookorbit-tools",
+      "source": "./bookorbit",
+      "description": "Unofficial skills for a self-hosted BookOrbit book library: safe upgrades with backup, pinned images and verification."
     }
   ]
 }

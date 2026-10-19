@@ -5,6 +5,7 @@
 | Skill | What it does |
 |---|---|
 | [`immich/skills/upgrade`](immich/skills/upgrade/SKILL.md) (`immich-upgrade`, in the `immich-tools` plugin) | Upgrades a self-hosted Immich (Docker Compose): reads every release in between for breaking changes, dumps the database, refreshes the official compose files while keeping your edits, restarts, and verifies health, migrations and port bindings. |
+| [`bookorbit/skills/upgrade`](bookorbit/skills/upgrade/SKILL.md) (`bookorbit-upgrade`, in the `bookorbit-tools` plugin) | Upgrades a self-hosted BookOrbit (Docker Compose): backs up the database and app data, reads every release in between, refreshes the official compose file while keeping your edits, pins the image instead of `latest`, and verifies health, migrations, port bindings and the book count. |
 
 ## Install
 
@@ -12,12 +13,14 @@ As a plugin, from this repo's marketplace:
 
 ```text
 /plugin install immich-tools --marketplace JuanVqz/skills
+/plugin install bookorbit-tools --marketplace JuanVqz/skills
 ```
 
 With the [skills CLI](https://skills.sh/juanvqz/skills), for Claude Code or other agents:
 
 ```bash
 npx skills add JuanVqz/skills --skill immich-upgrade
+npx skills add JuanVqz/skills --skill bookorbit-upgrade
 ```
 
 Or copy a single skill into your skills directory:
@@ -28,9 +31,9 @@ mkdir -p ~/.claude/skills
 cp -r skills/immich/skills/upgrade ~/.claude/skills/immich-upgrade
 ```
 
-Then ask Claude Code something like "upgrade Immich to the latest version". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.
+Then ask Claude Code something like "upgrade Immich to the latest version" or "upgrade BookOrbit". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.
 
-The Immich skills are unofficial and not affiliated with Immich or FUTO. They read release notes and download release files from GitHub (`github.com/immich-app/immich`); nothing else leaves your machine.
+The Immich skills are unofficial and not affiliated with Immich or FUTO, and the BookOrbit skills are unofficial and not affiliated with BookOrbit. They read release notes and download release files from GitHub (`github.com/immich-app/immich`, `github.com/bookorbit/bookorbit`); nothing else leaves your machine.
 
 ## Conventions
 
