@@ -15,6 +15,11 @@
       "name": "bookorbit-tools",
       "source": "./bookorbit",
       "description": "Unofficial skills for a self-hosted BookOrbit book library: safe upgrades with backup, pinned images and verification."
+    },
+    {
+      "name": "romm-tools",
+      "source": "./romm",
+      "description": "Unofficial skills for a self-hosted RomM game library: safe upgrades with client checks, backup and verification."
     }
   ]
 }
