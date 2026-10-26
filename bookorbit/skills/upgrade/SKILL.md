@@ -9,7 +9,7 @@ BookOrbit applies its database migrations every time the app starts, and there i
 
 Work on the machine that runs BookOrbit, or over SSH to it. Ask the user for the host if it is not obvious.
 
-If the user only wants to know what an upgrade would involve ("is it safe to update?", "what would change?", "plan it", "dry run"), do Step 1 and Step 3 without changing anything, report what changes for them, and stop. Start from Step 2 when they ask to go ahead.
+If the user only wants to know what an upgrade would involve ("is it safe to update?", "what would change?", "plan it", "dry run"), do Step 1, Step 3 and the download and diff in Step 4 (new required variables show up there) without changing anything, report what changes for them, and stop. Start from Step 2 when they ask to go ahead.
 
 Two rules for the whole run:
 
@@ -23,7 +23,7 @@ Locate the directory with BookOrbit's `docker-compose.yml` and `.env`: `docker i
 Record, before changing anything:
 
 - **The running version:** the image tag, `docker inspect -f '{{.Config.Image}}' bookorbit-app`. If it is `latest` (the official `.env.example` sets `APP_IMAGE=ghcr.io/bookorbit/bookorbit:latest`), read the real version from the image: `docker exec bookorbit-app printenv APP_VERSION` (set in the image, so it works with update checks off; the startup log's `update_check` line is missing then). Pin an exact tag as part of this upgrade and tell the user why: with `latest`, any `docker compose pull` can upgrade and migrate the database without anyone reading the notes.
-- **The database image.** The official compose uses `pgvector/pgvector:pg18`, a moving tag. Suggest pinning it too (for example `pgvector/pgvector:0.8.1-pg18`), and never change its Postgres major version as part of an app upgrade. If the install uses an external database through `DATABASE_URL`, back that one up instead in Step 2.
+- **The database image.** The official compose uses `pgvector/pgvector:pg18`, a moving tag. Suggest pinning it to what already runs (the pgvector version from `select extversion from pg_extension where extname = 'vector'`, for example `pgvector/pgvector:0.8.1-pg18`), as its own change after this upgrade: `docker compose up -d` pulls and recreates any service whose image line changed, so a new database tag set now would swap the database in the same restart as the app. Never change its Postgres major version as part of an app upgrade. If the install uses an external database through `DATABASE_URL`, back that one up instead in Step 2.
 - **Paths:** the books folder mounted at `/books`, the app data folder mounted at `/data`, and any extra mounts (a Book Dock folder, for example).
 - **Port bindings:** `docker compose ps --format '{{.Name}} {{.Ports}}'`. Step 7 compares against this.
 - **Health while the old version still works:** both containers healthy, `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"`, and `docker compose config --quiet` succeeds.
@@ -36,27 +36,26 @@ If the stack is already unhealthy, stop and fix that first.
 ```bash
 set -o pipefail
 docker exec bookorbit-db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' \
-  | gzip > <safe-path>/bookorbit-<running-version>-<date>.sql.gz
-gzip -t <safe-path>/bookorbit-<running-version>-<date>.sql.gz
+  | gzip > <safe-path>/bookorbit-<running-version>-<date>.sql.gz && echo dump ok
 zcat <safe-path>/bookorbit-<running-version>-<date>.sql.gz | grep -c 'PostgreSQL database dump complete'
 tar czf <safe-path>/bookorbit-<running-version>-<date>-data.tgz -C <compose-dir> <app-data-folder>
 ls -la <safe-path>/bookorbit-<running-version>-<date>*
 ```
 
-The dump reads the user and database from the container's own environment, so no credential appears in the command. `pipefail` matters: without it a failed `docker exec` still leaves a small valid gzip that passes `gzip -t`; the `grep -c` must print 1, the line `pg_dump` writes only when it finishes. The app data folder is the one mounted at `/data` (`data/app` in the official compose), never its parent: `data/` also holds the live Postgres files. Write both files outside the Postgres data folder, ideally on another disk. Stop if any command fails, or if the dump is much smaller than a previous one.
+The dump reads the user and database from the container's own environment, so no credential appears in the command. A failed dump still leaves a small valid gzip, so `gzip -t` would prove nothing. With `pipefail` the first command fails and `dump ok` is missing; the `grep -c` must print 1, the line `pg_dump` writes only when it finishes. The app data folder is the one mounted at `/data` (`data/app` in the official compose), never its parent: `data/` also holds the live Postgres files. Write both files outside the Postgres data folder, ideally on another disk. Stop if any command fails, or if the dump is much smaller than a previous one.
 
 The app data folder holds covers, caches and installed plugins; it is small. The books are not touched by an upgrade, but if the user has no copy of the books folder anywhere else, say so.
 
 Then snapshot what the library holds, so Step 7 can prove nothing was lost. Pipe the SQL in through stdin; quoting it inside `ssh '...'` or `sh -c "..."` breaks on the inner quotes:
 
 ```bash
-cat > counts.sql <<'EOF'
+cat > <safe-path>/counts.sql <<'EOF'
 select (select count(*) from books) as books, (select count(*) from book_files) as files,
        (select count(*) from authors) as authors, (select count(*) from users) as users,
        (select count(*) from reading_progress) as progress, (select count(*) from annotations) as annotations,
        (select count(*) from collections) as collections;
 EOF
-docker exec -i bookorbit-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < counts.sql \
+docker exec -i bookorbit-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < <safe-path>/counts.sql \
   | tee <safe-path>/bookorbit-<running-version>-<date>-counts.txt
 ```
 
@@ -98,14 +97,13 @@ Set the target in the image line (`ghcr.io/bookorbit/bookorbit:<to>`) or in `APP
 
 Pull the image now, while the old version still runs: `docker pull ghcr.io/bookorbit/bookorbit:<to>`. It proves the tag exists (a typo or a `v` prefix fails here, not after the app is down) and keeps the downtime in Step 6 to a few seconds. The image is about 250 MB compressed.
 
-## Step 6: Pull and restart
+## Step 6: Restart
 
 ```bash
-docker compose pull app
 docker compose up -d
 ```
 
-Pull only the app service (`app` in the official compose). A bare `docker compose pull` also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
+The new image is already pulled in Step 5. Do not run a bare `docker compose pull` here: it also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
 
 ## Step 7: Verify
 
@@ -117,7 +115,7 @@ Wait until both containers report healthy (a few seconds on a small library: 3.3
 - Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since 10m 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0).
 - Health: `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"` with the database `up`.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:3000:3000` back into `3000:3000`, which Docker publishes on every interface, past host firewalls like `ufw`.
-- The counts from Step 2 match: run the same `counts.sql` again. More books is normal if an import ran in between; fewer is not, so stop and investigate before deleting the backup.
+- The counts from Step 2 match: run the same `<safe-path>/counts.sql` again. More books is normal if an import ran in between; fewer is not, so stop and investigate before deleting the backup.
 - The URL people actually use (reverse proxy, Tailscale, a domain) answers `/api/v1/health`. Check it from another machine; a server often cannot resolve its own MagicDNS or split-DNS name.
 - If the release touched a device integration the user relies on (KOReader, Kobo, OPDS, email), ask them to try it once.
 

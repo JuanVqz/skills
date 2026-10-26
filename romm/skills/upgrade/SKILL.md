@@ -23,7 +23,7 @@ Locate the directory with RomM's `docker-compose.yml`: `docker inspect romm --fo
 Record, before changing anything:
 
 - **The running version:** `curl -s localhost:<port>/api/heartbeat` and read `SYSTEM.VERSION`. Also the image tag, `docker inspect -f '{{.Config.Image}}' romm`. If it is `latest`, pin an exact tag as part of this upgrade and tell the user why: with `latest`, any `docker compose pull` can upgrade and migrate the database without anyone reading the notes.
-- **The database image.** The official example has used both `mariadb:latest` and pinned majors. Suggest pinning one (for example an LTS line such as `mariadb:11.8`), and never change the database major version as part of a RomM upgrade.
+- **The database image.** The official example uses `mariadb:latest`, which moves to each new major. Read the version actually running (`docker exec romm-db mariadb --version`) and suggest pinning that line (`11.8`, `12.3`, ...), never a lower one: MariaDB does not support downgrades, so an LTS older than the data files breaks the database. Make the pin its own change after this upgrade, not part of it, and never change the database major version during a RomM upgrade.
 - **Port bindings:** `docker compose ps --format '{{.Name}} {{.Ports}}'`. Step 9 compares against this.
 - **Health while the old version still works:** the `romm` container has no Docker healthcheck, so use the heartbeat above; `romm-db` reports `healthy`. `docker compose config --quiet` succeeds.
 - **No scan is running.** A restart kills a running scan. Check the last minutes of `docker logs romm` for scan progress, and ask the user before interrupting one.
@@ -75,25 +75,25 @@ diff -r /tmp/romm-<from> /tmp/romm-<to>
 ```bash
 set -o pipefail
 docker exec romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump -u"$MARIADB_USER" --single-transaction "$MARIADB_DATABASE"' \
-  | gzip > <safe-path>/romm-<running-version>-<date>.sql.gz
-gzip -t <safe-path>/romm-<running-version>-<date>.sql.gz && ls -la <safe-path>/romm-<running-version>-<date>.sql.gz
+  | gzip > <safe-path>/romm-<running-version>-<date>.sql.gz && echo dump ok
+ls -la <safe-path>/romm-<running-version>-<date>.sql.gz
 zcat <safe-path>/romm-<running-version>-<date>.sql.gz | tail -1    # -- Dump completed on <date>
 ```
 
-The password goes through the container's own environment, so it never appears in the command or in `ps`. `pipefail` makes a failed `docker exec` fail the pipeline instead of leaving a small valid gzip; the last line must be `-- Dump completed on ...`, which `mariadb-dump` writes only when it finishes. `--single-transaction` gives a consistent dump without locking RomM. A library of about 15,000 games took 35 seconds and 40 MB compressed. Write it outside the MariaDB data folder, ideally on another disk; stop if a command fails or the dump is much smaller than a previous one.
+The password goes through the container's own environment, so it never appears in the command or in `ps`. A failed dump still leaves a small valid gzip, so `gzip -t` proves nothing. With `pipefail` the first command fails and `dump ok` is missing; the last line must be `-- Dump completed on ...`, which `mariadb-dump` writes only when it finishes. `--single-transaction` gives a consistent dump without locking RomM. A library of about 15,000 games took 35 seconds and 40 MB compressed. Write it outside the MariaDB data folder, ideally on another disk; stop if a command fails or the dump is much smaller than a previous one.
 
 Also back up the `config` folder (mounted at `/romm/config`) and the `assets` folder (saves, states, screenshots), which hold user data: `tar czf <safe-path>/romm-<running-version>-<date>-assets-config.tgz -C <assets-parent> assets -C <config-parent> config` (each `-C` switches to the folder that holds the next one; use absolute paths, because a relative `-C` is resolved from the previous one). The `resources` folder (scraped covers and media) is large and can be scraped again, but scraping is slow and rate-limited; if the user has no copy, say so. The ROMs are not touched by an upgrade.
 
 Then snapshot what the library holds, piping the SQL through stdin so the quoting survives:
 
 ```bash
-cat > counts.sql <<'EOF'
+cat > <safe-path>/counts.sql <<'EOF'
 select (select count(*) from roms) roms, (select count(*) from rom_files) files,
        (select count(*) from platforms) platforms, (select count(*) from users) users,
        (select count(*) from collections) collections, (select count(*) from saves) saves,
        (select count(*) from states) states;
 EOF
-docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -t' < counts.sql \
+docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -t' < <safe-path>/counts.sql \
   | tee <safe-path>/romm-<running-version>-<date>-counts.txt
 ```
 
@@ -114,19 +114,19 @@ Set the target in the image line (`rommapp/romm:<to>`), confirm with `docker com
 ```bash
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker compose up -d
-timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'RomM is now available|migrations failed|Traceback'; do sleep 5; done"
+timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'Database migrations succeeded|Failed to run database migrations|Traceback'; do sleep 5; done"
 ```
 
-`up -d` recreates the container whose image changed. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
+`up -d` recreates the container whose image changed. The loop stops on the migration result. If it prints "Failed to run database migrations", go to "If it goes wrong": RomM keeps starting after a failed migration and still logs "RomM is now available", so that line does not prove success. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
 
 ## Step 9: Verify
 
 - The version: `curl -s localhost:<port>/api/heartbeat` shows the target in `SYSTEM.VERSION`.
-- Migrations: `docker logs romm 2>&1 | grep -E "Database migrations"` ends with "Database migrations succeeded" for this start.
+- Migrations: `docker logs romm 2>&1 | grep -iE "database migrations"` ends with "Database migrations succeeded" for this start.
 - Errors: `docker logs romm --since 30m 2>&1 | grep -E "ERROR|CRITICAL|Traceback"` prints nothing new.
 - `docker compose ps`: both containers up, `romm-db` healthy.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:8080:8080` back into `8080:8080`, which Docker publishes on every interface, past host firewalls like `ufw`.
-- The counts from Step 5 match: run the same `counts.sql`. More is normal if a scan added games in between; fewer is not, so stop and investigate before deleting the backup.
+- The counts from Step 5 match: run the same `<safe-path>/counts.sql`. More is normal if a scan added games in between; fewer is not, so stop and investigate before deleting the backup.
 - The URL people actually use (reverse proxy, Tailscale, a domain) answers `/api/heartbeat`. Check it from another machine; a server often cannot resolve its own MagicDNS or split-DNS name.
 - Covers are still served. Take one cover path from the database and fetch it through RomM:
 
@@ -153,7 +153,12 @@ Do not start an older image on a database the newer one already migrated. Instea
 
 1. Stop RomM: `docker compose stop romm`.
 2. Set the image back to the version of the dump.
-3. Restore the dump: `gunzip -c <dump>.sql.gz | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"'`. `mariadb-dump` writes `DROP TABLE IF EXISTS` before each table, so tables are replaced; a table that only the new version created stays behind, so for a clean result drop and recreate the database first (as the MariaDB root user).
+3. Restore the dump into an empty database. Its `DROP TABLE IF EXISTS` lines only replace the tables the old version had; a table the new version created would stay behind and make the next upgrade fail with "Table already exists". So drop and recreate the database first, as the MariaDB root user (the RomM user keeps its grants, which are stored by database name). `mariadb` stops at the first error:
+
+   ```bash
+   docker exec romm-db sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -uroot -e "DROP DATABASE \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\`;"'
+   gunzip -c <dump>.sql.gz | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"'
+   ```
 4. Put back the `assets` and `config` folders from the Step 5 archive, so saves, states and `config.yml` match the restored database: move the current ones aside, then `tar xzf <archive> -C <assets-parent> assets` and `tar xzf <archive> -C <config-parent> config` (absolute paths).
 5. `docker compose up -d` and verify as in Step 9.
 
