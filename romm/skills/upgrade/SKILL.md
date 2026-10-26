@@ -39,7 +39,7 @@ Some RomM clients only work with the server version they were built for. [Grout]
 gh release list -R rommapp/grout -L 5
 ```
 
-If a client the user depends on has no release for the target version yet, stop and tell them, and let them choose. Look at what the server change is first: `git clone -q --filter=blob:none --bare https://github.com/rommapp/romm.git /tmp/romm-git && git -C /tmp/romm-git diff --name-only <from> <to> -- backend` (a few seconds: it fetches no file contents). GitHub's compare API stops at 300 files without saying so (5.3.1 to 5.4.0 changed 2,148), so it can hide the backend changes. A patch release that touches no `backend/` code outside the tests (5.4.1 only changed Dockerfiles, dependency pins, CI and one test) leaves the API Grout uses as it was, and Grout itself only checks for RomM 5 or newer; its "Match RomM" update channel is what errors until a matching Grout exists. A release that changes the backend can break the client until it catches up. Note which clients must be updated after the server (Step 10).
+If a client the user depends on has no release for the target version yet, stop and tell them, and let them choose. Look at what the server change is first: `rm -rf /tmp/romm-git && git clone -q --filter=blob:none --bare https://github.com/rommapp/romm.git /tmp/romm-git && git -C /tmp/romm-git diff --name-only <from> <to> -- backend` (a few seconds: it fetches no file contents; a fresh clone each time has the new tags). GitHub's compare API stops at 300 files without saying so (5.3.1 to 5.4.0 changed 2,148), so it can hide the backend changes. A patch release that touches no `backend/` code outside the tests (5.4.1 only changed Dockerfiles, dependency pins, CI and one test) leaves the API Grout uses as it was, and Grout itself only checks for RomM 5 or newer; its "Match RomM" update channel is what errors until a matching Grout exists. A release that changes the backend can break the client until it catches up. Note which clients must be updated after the server (Step 10).
 
 ## Step 3: Read what changed
 
@@ -61,9 +61,9 @@ RomM publishes no release assets for compose; use the files in the repo at each 
 
 ```bash
 for v in <from> <to>; do
-  mkdir -p /tmp/romm-$v
+  rm -rf /tmp/romm-$v && mkdir -p /tmp/romm-$v
   for f in examples/docker-compose.example.yml env.template; do
-    curl -sfL -o /tmp/romm-$v/$(basename $f) https://raw.githubusercontent.com/rommapp/romm/$v/$f
+    curl -sfL -o /tmp/romm-$v/$(basename $f) https://raw.githubusercontent.com/rommapp/romm/$v/$f || echo "missing: $v/$f"
   done
 done
 diff -r /tmp/romm-<from> /tmp/romm-<to>
@@ -113,18 +113,18 @@ Set the target in the image line (`rommapp/romm:<to>`), confirm with `docker com
 ## Step 8: Restart and wait for the migrations
 
 ```bash
-start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo $start
 docker compose up -d
 timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'Database migrations succeeded|Failed to run database migrations'; do sleep 5; done"
 ```
 
-`up -d` recreates the container whose image changed. The loop stops on the migration result only; a traceback from another startup task does not end it (Step 9 looks for those). If it prints "Failed to run database migrations", go to "If it goes wrong": RomM keeps starting after a failed migration and still logs "RomM is now available", so that line does not prove success. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
+`up -d` recreates the container whose image changed. Note the printed start time: Step 9 uses it, and a new shell loses `$start`. The loop stops on the migration result only; a traceback from another startup task does not end it (Step 9 looks for those). If it prints "Failed to run database migrations", go to "If it goes wrong": RomM keeps starting after a failed migration and still logs "RomM is now available", so that line does not prove success. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
 
 ## Step 9: Verify
 
 - The version: `curl -s localhost:<port>/api/heartbeat` shows the target in `SYSTEM.VERSION`.
 - Migrations: `docker logs romm 2>&1 | grep -iE "database migrations"` ends with "Database migrations succeeded" for this start.
-- Errors: `docker logs romm --since 30m 2>&1 | grep -E "ERROR|CRITICAL|Traceback"` prints nothing new.
+- Errors: `docker logs romm --since <start> 2>&1 | grep -E "ERROR|CRITICAL|Traceback"` prints nothing, with the time from Step 8, so the check covers this start however long the migrations took.
 - `docker compose ps`: both containers up, `romm-db` healthy.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:8080:8080` back into `8080:8080`, which Docker publishes on every interface, past host firewalls like `ufw`.
 - The counts from Step 5 match: run the same `<safe-path>/counts.sql`. More is normal if a scan added games in between; fewer is not, so stop and investigate before deleting the backup.
@@ -144,7 +144,7 @@ timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'Databa
 
 Tell the user to update each client from Step 2 to the matching release now (for Grout, the release whose first three parts match the new RomM version), and to try one download from a handheld.
 
-Remove the old image: `docker image rm rommapp/romm:<old>`. Keep the backups until the user has used the new version for a while.
+Remove the old image: `docker image rm rommapp/romm:<old>` (`:latest` if Step 1 found the install on `latest`). Keep the backups until the user has used the new version for a while.
 
 Report: from and to, what the release notes changed for them, where the backups are, the verification results, which clients need updating, and anything unusual in the logs. If a check could not run, say so instead of marking it verified.
 

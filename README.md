@@ -26,12 +26,14 @@ npx skills add JuanVqz/skills --skill bookorbit-upgrade
 npx skills add JuanVqz/skills --skill romm-upgrade
 ```
 
-Or copy a single skill into your skills directory:
+Or copy a skill into your skills directory, named after the skill (each one's folder is called `upgrade`, so the name keeps them apart):
 
 ```bash
 git clone https://github.com/JuanVqz/skills.git
 mkdir -p ~/.claude/skills
 cp -r skills/immich/skills/upgrade ~/.claude/skills/immich-upgrade
+cp -r skills/bookorbit/skills/upgrade ~/.claude/skills/bookorbit-upgrade
+cp -r skills/romm/skills/upgrade ~/.claude/skills/romm-upgrade
 ```
 
 Then ask Claude Code something like "upgrade Immich to the latest version", "upgrade BookOrbit" or "upgrade RomM". The skill also triggers on the "new version available" banner, a version number, or an old install that needs to catch up.

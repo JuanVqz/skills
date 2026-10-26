@@ -23,7 +23,7 @@ Locate the directory with BookOrbit's `docker-compose.yml` and `.env`: `docker i
 Record, before changing anything:
 
 - **The running version:** the image tag, `docker inspect -f '{{.Config.Image}}' bookorbit-app`. If it is `latest` (the official `.env.example` sets `APP_IMAGE=ghcr.io/bookorbit/bookorbit:latest`), read the real version from the image: `docker exec bookorbit-app printenv APP_VERSION` (set in the image, so it works with update checks off; the startup log's `update_check` line is missing then). Pin an exact tag as part of this upgrade and tell the user why: with `latest`, any `docker compose pull` can upgrade and migrate the database without anyone reading the notes.
-- **The database image.** The official compose uses `pgvector/pgvector:pg18`, a moving tag. Suggest pinning it to what already runs (the pgvector version from `select extversion from pg_extension where extname = 'vector'`, for example `pgvector/pgvector:0.8.1-pg18`), as its own change after this upgrade: `docker compose up -d` pulls and recreates any service whose image line changed, so a new database tag set now would swap the database in the same restart as the app. Never change its Postgres major version as part of an app upgrade. If the install uses an external database through `DATABASE_URL`, back that one up instead in Step 2.
+- **The database image.** The official compose uses `pgvector/pgvector:pg18`, a moving tag. Suggest pinning it to what already runs (the pgvector version in the running image, `default_version` from `select default_version, installed_version from pg_available_extensions where name = 'vector'`; `installed_version` can lag behind it, and pinning that would downgrade the image. For example `pgvector/pgvector:0.8.1-pg18`), as its own change after this upgrade: `docker compose up -d` pulls and recreates any service whose image line changed, so a new database tag set now would swap the database in the same restart as the app. Never change its Postgres major version as part of an app upgrade. If the install uses an external database through `DATABASE_URL`, back that one up instead in Step 2.
 - **Paths:** the books folder mounted at `/books`, the app data folder mounted at `/data`, and any extra mounts (a Book Dock folder, for example).
 - **Port bindings:** `docker compose ps --format '{{.Name}} {{.Ports}}'`. Step 7 compares against this.
 - **Health while the old version still works:** both containers healthy, `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"`, and `docker compose config --quiet` succeeds.
@@ -69,7 +69,7 @@ gh release list -R bookorbit/bookorbit -L 15
 
 Without `gh`, use `https://github.com/bookorbit/bookorbit/releases`. GitHub releases are tagged `vX.Y.Z`; the image tag has no `v` (`ghcr.io/bookorbit/bookorbit:3.4.0`).
 
-Read the notes of every release between the running version and the target, not only the newest (`gh release view <tag> -R bookorbit/bookorbit`). Look for breaking changes, required manual steps, new or renamed environment variables, database changes, and anything that touches what the user relies on: KOReader or Kobo sync, OPDS, Book Dock imports, metadata written into book files, email delivery. When a release ships a new device plugin (the KOReader plugin lives in the repo's `koreader-plugin/` and the server hands it out), check that the server still accepts the plugin version on the user's devices before upgrading: search the server code for a minimum plugin version (`gh api -X GET search/code -f q="repo:bookorbit/bookorbit pluginVersion"`). v3.5.0 shipped plugin 2.0.0 with no minimum, and plugins from 1.4.0 update themselves.
+Read the notes of every release between the running version and the target, not only the newest (`gh release view <tag> -R bookorbit/bookorbit`). Look for breaking changes, required manual steps, new or renamed environment variables, database changes, and anything that touches what the user relies on: KOReader or Kobo sync, OPDS, Book Dock imports, metadata written into book files, email delivery. When a release ships a new device plugin (the KOReader plugin lives in the repo's `koreader-plugin/` and the server hands it out), check that the server still accepts the plugin version on the user's devices before upgrading: search the server code for a minimum plugin version (`gh api -X GET search/code -f q="repo:bookorbit/bookorbit pluginVersion"`). Code search only covers the default branch, so read each file it finds at the target tag: `gh api 'repos/bookorbit/bookorbit/contents/<path>?ref=v<to>' --jq .content | base64 -d`. v3.5.0 shipped plugin 2.0.0 with no minimum, and plugins from 1.4.0 update themselves.
 
 Tell the user, in a few lines: what changes for them and anything they must do. If there is a manual step, a config change, a database image change or a major version jump, get their OK before continuing. Otherwise say so and continue.
 
@@ -79,9 +79,9 @@ Download the official files for the running version and the target, and diff the
 
 ```bash
 for v in v<from> v<to>; do
-  mkdir -p /tmp/bookorbit-$v
+  rm -rf /tmp/bookorbit-$v && mkdir -p /tmp/bookorbit-$v
   for f in docker-compose.yml .env.example; do
-    curl -sfL -o /tmp/bookorbit-$v/$f https://raw.githubusercontent.com/bookorbit/bookorbit/$v/$f
+    curl -sfL -o /tmp/bookorbit-$v/$f https://raw.githubusercontent.com/bookorbit/bookorbit/$v/$f || echo "missing: $v/$f"
   done
 done
 diff -r /tmp/bookorbit-v<from> /tmp/bookorbit-v<to>
@@ -100,11 +100,11 @@ Pull the image now, while the old version still runs: `docker pull ghcr.io/booko
 ## Step 6: Restart
 
 ```bash
-start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo $start
 docker compose up -d
 ```
 
-Keep `$start` for Step 7, so its log checks cover exactly this start however long the checks take. The new image is already pulled in Step 5. Do not run a bare `docker compose pull` here: it also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
+Step 7's log checks use this time, so they cover exactly this start however long the checks take. Note the printed value: a new shell loses `$start`, and an empty `--since` makes `docker logs` fail with an error the grep then hides. Put the time itself in Step 7 if the variable is gone. The new image is already pulled in Step 5. Do not run a bare `docker compose pull` here: it also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
 
 ## Step 7: Verify
 
@@ -113,7 +113,7 @@ Wait until both containers report healthy (a few seconds on a small library: 3.3
 - `docker compose ps`: both services `healthy`.
 - The version: `docker exec bookorbit-app printenv APP_VERSION` shows the target. There is no version endpoint.
 - Migrations: `docker logs bookorbit-app --since $start 2>&1 | grep "Migrations applied successfully"` prints one line.
-- Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since $start 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0).
+- Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since $start 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0). Crashes outside the logger print plain text, so also read the non-JSON lines, `docker logs bookorbit-app --since $start 2>&1 | grep -v '^{'`: a normal v3.5.0 start shows only "Migrations applied successfully" and a Fastify `FSTDEP022` deprecation warning; a stack trace (`Error:` followed by `at ...` lines) is a failure.
 - Health: `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"` with the database `up`.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:3000:3000` back into `3000:3000`, which Docker publishes on every interface, past host firewalls like `ufw`.
 - The counts from Step 2 match: run the same `<safe-path>/counts.sql` again. More books is normal if an import ran in between; fewer is not, so stop and investigate before deleting the backup.
@@ -122,7 +122,7 @@ Wait until both containers report healthy (a few seconds on a small library: 3.3
 
 ## Step 8: Clean up and report
 
-Remove the old image: `docker image rm ghcr.io/bookorbit/bookorbit:<old>`. Keep the backups until the user has used the new version for a while.
+Remove the old image: `docker image rm ghcr.io/bookorbit/bookorbit:<old>` (`:latest` if Step 1 found the install on `latest`; the version from `APP_VERSION` was never a local tag). Keep the backups until the user has used the new version for a while.
 
 Report: from and to, what the release notes changed for them, where the backups are, the verification results, and anything unusual in the logs. If a check could not run, say so instead of marking it verified.
 
@@ -141,7 +141,7 @@ Do not start an older image on a database the newer one already migrated. Instea
    ```
 
    If the install keeps extensions such as `vector` in `public`, the dump recreates them.
-4. Replace the app data folder with the one from the archive.
+4. Replace the app data folder with the one from the archive, so files the new version added do not stay next to the restored database: move the current one aside (`mv <compose-dir>/<app-data-folder> <compose-dir>/<app-data-folder>.new`), then `tar xzf <archive> -C <compose-dir>` (the same absolute `-C` as in Step 2).
 5. `docker compose up -d` and verify as in Step 7.
 
 Then read the release notes and BookOrbit's GitHub issues for the error before trying again.
