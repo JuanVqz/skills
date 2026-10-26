@@ -35,12 +35,14 @@ If the stack is already unhealthy, stop and fix that first. Upgrading a broken i
 Back up before even choosing the target, so nothing that follows can lose data. Immich keeps daily dumps in `UPLOAD_LOCATION/backups/`, but take a fresh one now:
 
 ```bash
+set -o pipefail
 docker exec immich_postgres pg_dump -U <DB_USERNAME> -d <DB_DATABASE_NAME> --clean --if-exists \
-  | gzip > <safe-path>/immich-<running-version>-<date>.sql.gz
-gzip -t <safe-path>/immich-<running-version>-<date>.sql.gz && ls -la <safe-path>/immich-<running-version>-<date>.sql.gz
+  | gzip > <safe-path>/immich-<running-version>-<date>.sql.gz && echo dump ok
+ls -la <safe-path>/immich-<running-version>-<date>.sql.gz
+zcat <safe-path>/immich-<running-version>-<date>.sql.gz | grep -c 'PostgreSQL database dump complete'
 ```
 
-Write it outside the Postgres data directory, ideally on another disk. Stop if `pg_dump` or `gzip -t` fails, or if the dump is much smaller than the newest one in `UPLOAD_LOCATION/backups/`. A dump that cannot be restored is not a backup.
+A failed `pg_dump` still leaves a small valid gzip, so `gzip -t` proves nothing. With `pipefail` the first command fails and `dump ok` is missing; the `grep -c` must print 1, the line `pg_dump` writes only when it finishes. Write it outside the Postgres data directory, ideally on another disk. Stop if any command fails, or if the dump is much smaller than the newest one in `UPLOAD_LOCATION/backups/`. A dump that cannot be restored is not a backup.
 
 Then take the "before" snapshot from `references/verify.md` (section 1): asset, people, album and generated-file counts. Save it next to the dump. Step 8 compares against it.
 
@@ -56,7 +58,7 @@ gh release list -R immich-app/immich -L 30
 
 Without `gh`, use `https://github.com/immich-app/immich/releases`.
 
-A gap in the patch numbers is not always a release you missed. v3.3.2 was never published: v3.3.1 went straight to v3.3.3. Confirm with the tags (`gh api repos/immich-app/immich/tags --jq '.[0:10][].name'`); a number missing there has no notes to read.
+A gap in the patch numbers is not always a release you missed. v3.3.2 was never published: v3.3.1 went straight to v3.3.3. Confirm with the tags of that minor line (`gh api repos/immich-app/immich/git/matching-refs/tags/v3.3. --jq '.[].ref'`); a number missing there has no notes to read.
 
 If the running version is more than a minor release behind, or the upgrade crosses a major version, read `references/upgrade-path.md` and build the list of hops. Immich has required intermediate versions (for example 1.107.2 and 1.132.x), and a long direct jump can fail with `Invalid upgrade path`. For a patch or minor upgrade within the same major, the path is one hop.
 

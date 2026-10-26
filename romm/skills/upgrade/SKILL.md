@@ -25,6 +25,7 @@ Record, before changing anything:
 - **The running version:** `curl -s localhost:<port>/api/heartbeat` and read `SYSTEM.VERSION`. Also the image tag, `docker inspect -f '{{.Config.Image}}' romm`. If it is `latest`, pin an exact tag as part of this upgrade and tell the user why: with `latest`, any `docker compose pull` can upgrade and migrate the database without anyone reading the notes.
 - **The database image.** The official example uses `mariadb:latest`, which moves to each new major. Read the version actually running (`docker exec romm-db mariadb --version`) and suggest pinning that line (`11.8`, `12.3`, ...), never a lower one: MariaDB does not support downgrades, so an LTS older than the data files breaks the database. Make the pin its own change after this upgrade, not part of it, and never change the database major version during a RomM upgrade.
 - **Port bindings:** `docker compose ps --format '{{.Name}} {{.Ports}}'`. Step 9 compares against this.
+- **The database root password is available:** `docker exec romm-db sh -c 'test -n "$MARIADB_ROOT_PASSWORD"' && echo root ok`. The rollback needs it to recreate the database. If the install uses `MARIADB_RANDOM_ROOT_PASSWORD` or dropped the variable after the first start, find the root password (or another way to recreate the database) now, not while RomM is down.
 - **Health while the old version still works:** the `romm` container has no Docker healthcheck, so use the heartbeat above; `romm-db` reports `healthy`. `docker compose config --quiet` succeeds.
 - **No scan is running.** A restart kills a running scan. Check the last minutes of `docker logs romm` for scan progress, and ask the user before interrupting one.
 
@@ -38,7 +39,7 @@ Some RomM clients only work with the server version they were built for. [Grout]
 gh release list -R rommapp/grout -L 5
 ```
 
-If a client the user depends on has no release for the target version yet, stop and tell them, and let them choose. Look at what the server change is first: `gh api repos/rommapp/romm/compare/<from>...<to> --jq '.files[].filename'`. A patch release that touches no `backend/` code (5.4.1 only changed Dockerfiles, dependency pins and CI) leaves the API Grout uses as it was, and Grout itself only checks for RomM 5 or newer; its "Match RomM" update channel is what errors until a matching Grout exists. A release that changes the backend can break the client until it catches up. Note which clients must be updated after the server (Step 10).
+If a client the user depends on has no release for the target version yet, stop and tell them, and let them choose. Look at what the server change is first: `git clone -q --filter=blob:none --bare https://github.com/rommapp/romm.git /tmp/romm-git && git -C /tmp/romm-git diff --name-only <from> <to> -- backend` (a few seconds: it fetches no file contents). GitHub's compare API stops at 300 files without saying so (5.3.1 to 5.4.0 changed 2,148), so it can hide the backend changes. A patch release that touches no `backend/` code outside the tests (5.4.1 only changed Dockerfiles, dependency pins, CI and one test) leaves the API Grout uses as it was, and Grout itself only checks for RomM 5 or newer; its "Match RomM" update channel is what errors until a matching Grout exists. A release that changes the backend can break the client until it catches up. Note which clients must be updated after the server (Step 10).
 
 ## Step 3: Read what changed
 
@@ -114,10 +115,10 @@ Set the target in the image line (`rommapp/romm:<to>`), confirm with `docker com
 ```bash
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker compose up -d
-timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'Database migrations succeeded|Failed to run database migrations|Traceback'; do sleep 5; done"
+timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'Database migrations succeeded|Failed to run database migrations'; do sleep 5; done"
 ```
 
-`up -d` recreates the container whose image changed. The loop stops on the migration result. If it prints "Failed to run database migrations", go to "If it goes wrong": RomM keeps starting after a failed migration and still logs "RomM is now available", so that line does not prove success. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
+`up -d` recreates the container whose image changed. The loop stops on the migration result only; a traceback from another startup task does not end it (Step 9 looks for those). If it prints "Failed to run database migrations", go to "If it goes wrong": RomM keeps starting after a failed migration and still logs "RomM is now available", so that line does not prove success. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
 
 ## Step 9: Verify
 
@@ -157,8 +158,11 @@ Do not start an older image on a database the newer one already migrated. Instea
 
    ```bash
    docker exec romm-db sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -uroot -e "DROP DATABASE \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\`;"'
-   gunzip -c <dump>.sql.gz | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"'
+   set -o pipefail
+   gunzip -c <dump>.sql.gz | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"' && echo restore ok
    ```
+
+   Run `gzip -t` on the dump before the drop, and expect `restore ok`: with `pipefail`, a dump cut off partway fails the restore instead of leaving half the tables.
 4. Put back the `assets` and `config` folders from the Step 5 archive, so saves, states and `config.yml` match the restored database: move the current ones aside, then `tar xzf <archive> -C <assets-parent> assets` and `tar xzf <archive> -C <config-parent> config` (absolute paths).
 5. `docker compose up -d` and verify as in Step 9.
 

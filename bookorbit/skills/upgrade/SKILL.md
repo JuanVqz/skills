@@ -100,10 +100,11 @@ Pull the image now, while the old version still runs: `docker pull ghcr.io/booko
 ## Step 6: Restart
 
 ```bash
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker compose up -d
 ```
 
-The new image is already pulled in Step 5. Do not run a bare `docker compose pull` here: it also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
+Keep `$start` for Step 7, so its log checks cover exactly this start however long the checks take. The new image is already pulled in Step 5. Do not run a bare `docker compose pull` here: it also pulls the database image, and on the official moving `pgvector/pgvector:pg18` tag that can swap the database during an app upgrade. `up -d` recreates the containers whose image or configuration changed. A plain `restart` would keep the old image.
 
 ## Step 7: Verify
 
@@ -111,8 +112,8 @@ Wait until both containers report healthy (a few seconds on a small library: 3.3
 
 - `docker compose ps`: both services `healthy`.
 - The version: `docker exec bookorbit-app printenv APP_VERSION` shows the target. There is no version endpoint.
-- Migrations: `docker logs bookorbit-app --since 10m 2>&1 | grep "Migrations applied successfully"` prints one line.
-- Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since 10m 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0).
+- Migrations: `docker logs bookorbit-app --since $start 2>&1 | grep "Migrations applied successfully"` prints one line.
+- Errors: the app logs JSON lines with a numeric `level` (40 warn, 50 error, 60 fatal), so search by level instead of by words; a word search for "migrat" also hits harmless lines such as `MigrationProgressGateway` and `migrated=0`. `docker logs bookorbit-app --since $start 2>&1 | grep -E '"level":(40|50|60)' | grep -v LegacyRouteConverter` should print nothing. `LegacyRouteConverter` warnings that end with "refer to the migration guide" come from the web framework's route syntax and are harmless (three of them since v3.3.0).
 - Health: `curl -s localhost:<port>/api/v1/health` returns `"status":"ok"` with the database `up`.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:3000:3000` back into `3000:3000`, which Docker publishes on every interface, past host firewalls like `ufw`.
 - The counts from Step 2 match: run the same `<safe-path>/counts.sql` again. More books is normal if an import ran in between; fewer is not, so stop and investigate before deleting the backup.
@@ -131,7 +132,15 @@ Do not start an older image on a database the newer one already migrated. Instea
 
 1. Stop the app: `docker compose stop app`.
 2. Set the image back to the version of the backup.
-3. Restore the dump into a clean schema. Its `DROP ... IF EXISTS` lines only drop what the old version had, so tables or types the new version created would stay behind; drop the schema first, then restore with `ON_ERROR_STOP` so a failure stops instead of ending "successfully" half done: `docker exec bookorbit-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"'`, then `gunzip -c <dump>.sql.gz | docker exec -i bookorbit-db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`. If the install keeps extensions such as `vector` in `public`, the dump recreates them.
+3. Restore the dump into clean schemas. Its `DROP ... IF EXISTS` lines only drop what the old version had, so tables or types the new version created would stay behind. First test the dump with `gzip -t` (the schemas are about to go), then list the schemas (`\dn`): v3.5.0 has `public` and `drizzle`, the migrations journal. Drop each one the app uses, recreate `public`, and restore with `ON_ERROR_STOP` and `pipefail`, so a failed statement or a cut-off dump stops instead of ending "successfully" half done:
+
+   ```bash
+   docker exec bookorbit-db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE; CREATE SCHEMA public;"'
+   set -o pipefail
+   gunzip -c <dump>.sql.gz | docker exec -i bookorbit-db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' && echo restore ok
+   ```
+
+   If the install keeps extensions such as `vector` in `public`, the dump recreates them.
 4. Replace the app data folder with the one from the archive.
 5. `docker compose up -d` and verify as in Step 7.
 
