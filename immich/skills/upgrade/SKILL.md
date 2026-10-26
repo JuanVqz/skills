@@ -35,12 +35,14 @@ If the stack is already unhealthy, stop and fix that first. Upgrading a broken i
 Back up before even choosing the target, so nothing that follows can lose data. Immich keeps daily dumps in `UPLOAD_LOCATION/backups/`, but take a fresh one now:
 
 ```bash
+set -o pipefail
 docker exec immich_postgres pg_dump -U <DB_USERNAME> -d <DB_DATABASE_NAME> --clean --if-exists \
-  | gzip > <safe-path>/immich-<running-version>-<date>.sql.gz
-gzip -t <safe-path>/immich-<running-version>-<date>.sql.gz && ls -la <safe-path>/immich-<running-version>-<date>.sql.gz
+  | gzip > <safe-path>/immich-<running-version>-<date>.sql.gz && echo dump ok
+ls -la <safe-path>/immich-<running-version>-<date>.sql.gz
+zcat <safe-path>/immich-<running-version>-<date>.sql.gz | grep -c 'PostgreSQL database dump complete'
 ```
 
-Write it outside the Postgres data directory, ideally on another disk. Stop if `pg_dump` or `gzip -t` fails, or if the dump is much smaller than the newest one in `UPLOAD_LOCATION/backups/`. A dump that cannot be restored is not a backup.
+A failed `pg_dump` still leaves a small valid gzip, so `gzip -t` proves nothing. With `pipefail` the first command fails and `dump ok` is missing; the `grep -c` must print 1, the line `pg_dump` writes only when it finishes. Write it outside the Postgres data directory, ideally on another disk. Stop if any command fails, or if the dump is much smaller than the newest one in `UPLOAD_LOCATION/backups/`. A dump that cannot be restored is not a backup.
 
 Then take the "before" snapshot from `references/verify.md` (section 1): asset, people, album and generated-file counts. Save it next to the dump. Step 8 compares against it.
 
@@ -55,6 +57,8 @@ gh release list -R immich-app/immich -L 30
 ```
 
 Without `gh`, use `https://github.com/immich-app/immich/releases`.
+
+A gap in the patch numbers is not always a release you missed. v3.3.2 was never published: v3.3.1 went straight to v3.3.3. Confirm with the tags of that minor line (`gh api repos/immich-app/immich/git/matching-refs/tags/v3.3. --jq '.[].ref'`); a number missing there has no notes to read.
 
 If the running version is more than a minor release behind, or the upgrade crosses a major version, read `references/upgrade-path.md` and build the list of hops. Immich has required intermediate versions (for example 1.107.2 and 1.132.x), and a long direct jump can fail with `Invalid upgrade path`. For a patch or minor upgrade within the same major, the path is one hop.
 
@@ -122,7 +126,8 @@ Wait until the containers report healthy, then check, fixing or reporting anythi
 
 - `docker compose ps`: every service `healthy`.
 - `curl -s localhost:2283/api/server/version` shows the hop's version.
-- `docker logs immich_server --since 10m 2>&1 | grep -iE "migrat|error|mount folder"`: migrations end with "Finished running migrations", the mount check says "Successfully verified system mount folder checks", and there is no `Invalid upgrade path` or `corrupted migrations`.
+- `docker logs immich_server --since 10m 2>&1 | grep -iE "migrat|error|mount folder"`: migrations end with "Finished running migrations", the mount check says "Successfully verified system mount folder checks", and there is no `Invalid upgrade path` or `corrupted migrations`. Since v3.3 the grep also catches `WARN [Api:LegacyRouteConverter] Unsupported route path: "/api/*"`, because its text says "refer to the migration guide". It comes from the web framework, not the database, and is harmless.
+- The URL people actually use (reverse proxy, Tailscale, a domain) answers `/api/server/version` with the new version. Check it from another machine: a server often cannot resolve its own MagicDNS or split-DNS name, so a failure from the server itself can look like an outage that is not there.
 - Port bindings match Step 1. A careless merge can turn `127.0.0.1:2283:2283` back into `2283:2283`, which Docker publishes on every interface, past host firewalls like `ufw`.
 
 Then run the deeper checks in `references/verify.md` (sections 2 to 6): counts against the Step 2 snapshot, thumbnails present on disk, data the new version expects, log errors, and a look at the app as a user. These catch the failures that leave every container "healthy": missing thumbnails, videos that will not play, metadata a new table expects.
