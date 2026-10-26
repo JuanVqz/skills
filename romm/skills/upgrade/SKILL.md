@@ -38,7 +38,7 @@ Some RomM clients only work with the server version they were built for. [Grout]
 gh release list -R rommapp/grout -L 5
 ```
 
-If a client the user depends on has no release for the target version yet, stop and tell them: upgrading now breaks that client until it catches up. Note which clients must be updated after the server (Step 10).
+If a client the user depends on has no release for the target version yet, stop and tell them, and let them choose. Look at what the server change is first: `gh api repos/rommapp/romm/compare/<from>...<to> --jq '.files[].filename'`. A patch release that touches no `backend/` code (5.4.1 only changed Dockerfiles, dependency pins and CI) leaves the API Grout uses as it was, and Grout itself only checks for RomM 5 or newer; its "Match RomM" update channel is what errors until a matching Grout exists. A release that changes the backend can break the client until it catches up. Note which clients must be updated after the server (Step 10).
 
 ## Step 3: Read what changed
 
@@ -73,14 +73,16 @@ diff -r /tmp/romm-<from> /tmp/romm-<to>
 ## Step 5: Back up the database
 
 ```bash
+set -o pipefail
 docker exec romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump -u"$MARIADB_USER" --single-transaction "$MARIADB_DATABASE"' \
   | gzip > <safe-path>/romm-<running-version>-<date>.sql.gz
 gzip -t <safe-path>/romm-<running-version>-<date>.sql.gz && ls -la <safe-path>/romm-<running-version>-<date>.sql.gz
+zcat <safe-path>/romm-<running-version>-<date>.sql.gz | tail -1    # -- Dump completed on <date>
 ```
 
-The password goes through the container's own environment, so it never appears in the command or in `ps`. `--single-transaction` gives a consistent dump without locking RomM. A library of about 15,000 games took 35 seconds and 40 MB compressed. Write it outside the MariaDB data folder, ideally on another disk; stop if a command fails or the dump is much smaller than a previous one.
+The password goes through the container's own environment, so it never appears in the command or in `ps`. `pipefail` makes a failed `docker exec` fail the pipeline instead of leaving a small valid gzip; the last line must be `-- Dump completed on ...`, which `mariadb-dump` writes only when it finishes. `--single-transaction` gives a consistent dump without locking RomM. A library of about 15,000 games took 35 seconds and 40 MB compressed. Write it outside the MariaDB data folder, ideally on another disk; stop if a command fails or the dump is much smaller than a previous one.
 
-Also back up the `config` folder (mounted at `/romm/config`) and the `assets` folder (saves, states, screenshots), which hold user data: `tar czf <safe-path>/romm-<running-version>-<date>-assets-config.tgz -C <assets-parent> assets -C <config-parent> config` (each `-C` switches to the folder that holds the next one). The `resources` folder (scraped covers and media) is large and can be scraped again, but scraping is slow and rate-limited; if the user has no copy, say so. The ROMs are not touched by an upgrade.
+Also back up the `config` folder (mounted at `/romm/config`) and the `assets` folder (saves, states, screenshots), which hold user data: `tar czf <safe-path>/romm-<running-version>-<date>-assets-config.tgz -C <assets-parent> assets -C <config-parent> config` (each `-C` switches to the folder that holds the next one; use absolute paths, because a relative `-C` is resolved from the previous one). The `resources` folder (scraped covers and media) is large and can be scraped again, but scraping is slow and rate-limited; if the user has no copy, say so. The ROMs are not touched by an upgrade.
 
 Then snapshot what the library holds, piping the SQL through stdin so the quoting survives:
 
@@ -110,11 +112,12 @@ Set the target in the image line (`rommapp/romm:<to>`), confirm with `docker com
 ## Step 8: Restart and wait for the migrations
 
 ```bash
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker compose up -d
-timeout 1800 sh -c 'docker logs -f romm 2>&1 | grep -m1 -E "RomM is now available|migrations failed|Traceback"'
+timeout 1800 sh -c "until docker logs --since $start romm 2>&1 | grep -E 'RomM is now available|migrations failed|Traceback'; do sleep 5; done"
 ```
 
-`up -d` recreates the container whose image changed. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
+`up -d` recreates the container whose image changed. Do not restart, stop or recreate it while "Running database migrations" is in progress, even if it seems stuck: some releases rewrite the `roms` table in batches, which takes many minutes on a large library. The 5.4.0 notes ask for 15 to 20 minutes; on about 15,600 games on a quad-core mini PC with the database on a hard disk it took 3.5 minutes. The loop polls instead of following the log: with `docker logs -f | grep -m1`, `docker logs` keeps running after the match until RomM writes another line, so a quiet RomM can hold the command for the full 30 minutes. The `timeout` only ends the watch after 30 minutes, never the container; if it runs out, keep watching the log rather than restarting.
 
 ## Step 9: Verify
 
@@ -151,6 +154,7 @@ Do not start an older image on a database the newer one already migrated. Instea
 1. Stop RomM: `docker compose stop romm`.
 2. Set the image back to the version of the dump.
 3. Restore the dump: `gunzip -c <dump>.sql.gz | docker exec -i romm-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"'`. `mariadb-dump` writes `DROP TABLE IF EXISTS` before each table, so tables are replaced; a table that only the new version created stays behind, so for a clean result drop and recreate the database first (as the MariaDB root user).
-4. `docker compose up -d` and verify as in Step 9.
+4. Put back the `assets` and `config` folders from the Step 5 archive, so saves, states and `config.yml` match the restored database: move the current ones aside, then `tar xzf <archive> -C <assets-parent> assets` and `tar xzf <archive> -C <config-parent> config` (absolute paths).
+5. `docker compose up -d` and verify as in Step 9.
 
 Then read the release notes and RomM's GitHub issues for the error before trying again.
