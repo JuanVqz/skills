@@ -40,8 +40,12 @@ Run the same queries. Live asset counts, people, albums and users should match. 
 A row in `asset_file` says a thumbnail exists; it does not prove the file is there. Sample a few hundred and check the files from inside the server container:
 
 ```sql
-select path from asset_file where type = 'thumbnail' order by random() limit 300;
+select af.path from asset_file af join asset a on a.id = af."assetId"
+where af.type = 'thumbnail' and a.visibility <> 'hidden'
+order by random() limit 300;
 ```
+
+The `visibility <> 'hidden'` filter leaves out the video half of each Live Photo. Those assets are hidden in the app, and on some libraries their `asset_file` thumbnail rows point at files that were never written; regenerating them does not create the files. Counted without the filter, they look like a missing-thumbnail problem that the app never shows.
 
 ```bash
 ... | while read p; do docker exec immich_server test -f "$p" || echo "missing $p"; done | wc -l
