@@ -1,0 +1,10 @@
+{
+  "name": "romm-tools",
+  "version": "0.1.0",
+  "description": "Unofficial Claude Code skills for running a self-hosted RomM game library. Not affiliated with RomM. Starts with a safe upgrade skill: client compatibility, backup first, release notes, keeping your compose edits, waiting out migrations, and verification.",
+  "author": { "name": "Juan Vásquez", "url": "https://juanvasquez.dev" },
+  "homepage": "https://github.com/JuanVqz/skills",
+  "repository": "https://github.com/JuanVqz/skills",
+  "license": "MIT",
+  "keywords": ["romm", "retro", "games", "homelab", "self-hosting", "docker", "upgrade"]
+}

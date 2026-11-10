@@ -1,0 +1,10 @@
+{
+  "name": "bookorbit-tools",
+  "version": "0.1.0",
+  "description": "Unofficial Claude Code skills for running a self-hosted BookOrbit book library. Not affiliated with BookOrbit. Starts with a safe upgrade skill: backup first, release notes, keeping your compose edits, pinned images, and verification.",
+  "author": { "name": "Juan Vásquez", "url": "https://juanvasquez.dev" },
+  "homepage": "https://github.com/JuanVqz/skills",
+  "repository": "https://github.com/JuanVqz/skills",
+  "license": "MIT",
+  "keywords": ["bookorbit", "ebooks", "homelab", "self-hosting", "docker", "upgrade"]
+}
