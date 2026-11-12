@@ -60,6 +60,14 @@ If the running version is more than a minor release behind, or the upgrade cross
 
 Read the release notes of every release between the running version and the target, not only the newest. Breaking changes often sit in an intermediate release. Look for breaking changes, required manual steps, removed or renamed environment variables, database image changes and mobile app requirements. Also check the breaking-change discussions: `https://github.com/immich-app/immich/discussions?discussions_q=label%3Achangelog%3Abreaking-change`.
 
+Then diff the official release files of each hop, with the download and `diff -r` commands at the start of Step 4. They only write to a scratch directory, so run them in plan-only mode too. The notes do not always explain what the diff shows: a release can make the default something an earlier release announced as opt-in, and its own notes then say nothing about it (`references/upgrade-path.md` lists known cases). For every variable, service or value that was added, changed or removed, beyond an image digest, find what it does and whether it needs anything from the user:
+
+- The notes of earlier releases: `gh release view <tag> -R immich-app/immich --json body --jq .body`.
+- The environment variables page of the docs: `https://docs.immich.app/install/environment-variables`.
+- The commit that changed the compose file. Its subject ends with the pull request number: `gh api "repos/immich-app/immich/commits?path=docker/docker-compose.yml&sha=<to>&per_page=10" --jq '.[] | "\(.commit.committer.date[0:10]) \(.commit.message | split("\n")[0])"'`. Match commits to the lines the diff changed, not by date: patch releases can ship from a separate branch, so a commit dated before the running release may still be new in the target.
+
+Count each of these as a config change for the OK below.
+
 Tell the user, in a few lines: the path (one hop or several), what changes for them, and anything they must do, such as updating the mobile apps before a major hop. If there is any manual step, config change, database image change or major version hop, get their OK before continuing. Otherwise say so and continue.
 
 Steps 4 to 8 run once per hop. Before each hop after the first, take a new dump as in Step 2.
@@ -78,7 +86,7 @@ done
 diff -r /tmp/immich-<from> /tmp/immich-<to>
 ```
 
-The diff shows what upstream changed: image digests, services, variables. Often it is one digest or nothing.
+The diff shows what upstream changed: image digests, services, variables. Often it is one digest or nothing. Every change beyond a digest should already be explained in the Step 3 plan; if one is not, go back to Step 3 for it before continuing.
 
 Confirm that both images exist for the target before stopping anything: `docker pull ghcr.io/immich-app/immich-server:<to>` and `docker pull ghcr.io/immich-app/immich-machine-learning:<to>` (with the `-cuda`, `-openvino` or other suffix if the install uses one). Pulling now also shortens the downtime later.
 
@@ -93,6 +101,8 @@ diff /tmp/immich-<from>/docker-compose.yml docker-compose.yml
 ```
 
 Build the new file from the hop's official `docker-compose.yml` and re-apply exactly those edits. Edit the file as text, not by loading and re-saving YAML, so comments and key order survive. Suggest marking each local edit with a comment such as `# local: <why>`, so the next upgrade finds them at a glance.
+
+If the new official file already contains one of the user's edits (they opted into something that is now the default), drop their copy instead of re-applying it: a key written twice in the same mapping makes the file invalid or lets one value silently win.
 
 Check the result: `diff /tmp/immich-<to>/docker-compose.yml docker-compose.yml` shows only the user's edits. If an upstream change touches a line the user edited, show both and ask.
 
@@ -150,6 +160,7 @@ Also save a short record next to `docker-compose.yml`, so the next upgrade (or t
 - From <old> to <new>, via <hops or "direct">
 - Dump: <path>
 - Local compose edits kept: <list>
+- Upstream compose changes applied: <list, or "digests only">
 - Verified: <healthy, version, migrations, ports, counts, thumbnails>
 - Notes: <anything the user must remember, or "none">
 ```

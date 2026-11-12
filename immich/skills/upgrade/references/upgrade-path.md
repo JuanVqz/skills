@@ -37,6 +37,7 @@ Compose and `.env` changes that are not version stops, but must be applied when 
 - 1.137.0: new compose template.
 - 3.0.0: `IMMICH_MACHINE_LEARNING_PING_TIMEOUT`, `MACHINE_LEARNING_PRELOAD__CLIP` and `MACHINE_LEARNING_PRELOAD__FACIAL_RECOGNITION` were removed.
 - 3.0.0, after the hop: the release notes say "For assets imported prior to v3, you will also need to re-run Metadata Extraction in the job panel for them to be re-processed." Run **Extract Metadata > All**, then check thumbnails and transcoding as in `verify.md` section 4.
+- 3.4.0: the official compose sets `MACHINE_LEARNING_MODEL_REVISION: v2` on the machine learning service, and the 3.4.0 notes do not mention it. The 3.3.0 notes explain it: the same models re-exported in an optimized format, faster and using less memory, outputs "numerically equivalent, so switching doesn't require re-running any tasks". Each model downloads again on first use into a `v2/` folder next to the old files, so the first smart search or face detection after the restart can take a few minutes. The old files stay in the model cache volume, and deleting them is optional. If the install points the server at a machine learning container elsewhere, set the variable there; the local compose does not reach it.
 
 Step 4's diff of each hop's release files catches these, as long as each hop diffs against its own previous release.
 
